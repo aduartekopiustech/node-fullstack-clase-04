@@ -82,8 +82,6 @@ Escribir las variables en cada comando es incómodo durante el desarrollo. La co
 NODE_ENV=development
 PORT=3000
 REQRES_BASE_URL=https://reqres.in/api
-REQRES_API_KEY=
-HTTP_CLIENT=fetch
 ```
 
 El formato es simple:
@@ -132,8 +130,6 @@ En su lugar, se versiona un archivo de ejemplo con las claves necesarias y valor
 NODE_ENV=development
 PORT=3000
 REQRES_BASE_URL=https://reqres.in/api
-REQRES_API_KEY=
-HTTP_CLIENT=fetch
 ```
 
 Así, cualquier persona del equipo sabe qué variables necesita, sin recibir secretos reales. En la documentación del proyecto se indica copiar el ejemplo:
@@ -161,9 +157,7 @@ for (const variable of requiredVariables) {
 const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
-  reqresBaseUrl: process.env.REQRES_BASE_URL,
-  reqresApiKey: process.env.REQRES_API_KEY ?? "",
-  httpClient: process.env.HTTP_CLIENT ?? "fetch",
+  reqresBaseUrl: process.env.REQRES_BASE_URL.replace(/\/+$/, ""),
 };
 
 export default env;
@@ -181,8 +175,8 @@ Este módulo aporta tres beneficios:
 {
   "type": "module",
   "scripts": {
-    "start": "node --env-file=.env src/app.js",
-    "dev": "node --env-file=.env --watch src/app.js"
+    "start": "node --env-file-if-exists=.env src/app.js",
+    "dev": "node --env-file-if-exists=.env --watch src/app.js"
   }
 }
 ```
@@ -191,12 +185,11 @@ Con esto, `npm start` carga automáticamente el archivo `.env`.
 
 **Variables que utilizaremos en la clase**
 
-| Variable          | Ejemplo                     | Uso                                             |
-| ----------------- | --------------------------- | ----------------------------------------------- |
-| `REQRES_BASE_URL` | `https://reqres.in/api`     | URL base de la API                              |
-| `REQRES_API_KEY`  | _(vacío o clave personal)_  | Clave opcional enviada en el header `x-api-key` |
-| `HTTP_CLIENT`     | `fetch` o `axios`           | Implementación HTTP activa (Tarea 009)          |
-| `NODE_ENV`        | `development`               | Modo de ejecución                               |
+| Variable          | Ejemplo                 | Uso                     |
+| ----------------- | ----------------------- | ----------------------- |
+| `REQRES_BASE_URL` | `https://reqres.in/api` | URL base de la API      |
+| `PORT`            | `3000`                  | Puerto de la aplicación |
+| `NODE_ENV`        | `development`           | Modo de ejecución       |
 
 > [!TIP]
 > **Desafío**
@@ -297,7 +290,6 @@ Los **headers** son metadatos que acompañan a la petición o a la respuesta. Lo
 | `Content-Type`  | `application/json`   | Formato del body que enviamos                   |
 | `Accept`        | `application/json`   | Formato de respuesta que esperamos              |
 | `Authorization` | `Bearer <token>`     | Credenciales de acceso                          |
-| `x-api-key`     | `<clave>`            | Clave de API, según el proveedor                |
 
 El **body** contiene los datos que enviamos al servidor. En APIs modernas suele estar en formato **JSON** (_JavaScript Object Notation_), un formato de texto con pares de clave y valor que puede convertirse fácilmente a objetos de JavaScript.
 
@@ -362,7 +354,7 @@ Podemos reemplazar `id` por `1`, `2`, etc.
 | `DELETE` | `/users/2`      | `204 No Content`, sin body                  |
 
 > [!NOTE]
-> La demo pública de Reqres tiene un límite diario bajo. Si se agota, es posible registrarse para obtener una clave gratuita y enviarla en el header `x-api-key`. Nuestro módulo de configuración ya contempla esa variable.
+> La demo pública de Reqres tiene un límite diario bajo. Si se agota, conviene esperar o utilizar otra API de prueba mientras se practica.
 
 #### Probar un endpoint sin escribir código
 
@@ -560,7 +552,7 @@ Nuestra aplicación necesita consumir la API de Reqres. Si mañana cambiamos la 
 Crear `src/config/env.config.js` con el módulo de configuración de la sección 1. Debe:
 
 1. Validar que `REQRES_BASE_URL` esté definida.
-2. Exportar `reqresBaseUrl`, `reqresApiKey`, `httpClient`, `port` y `nodeEnv`.
+2. Exportar `reqresBaseUrl`, `port` y `nodeEnv`.
 3. Convertir `port` a número.
 
 Crear también `.env.example` y agregar `.env` al `.gitignore`.
@@ -580,17 +572,16 @@ Crear `src/adapters/http/fetch.adapter.js`. Debe exportar un objeto con cinco fu
 La ruta recibida será relativa a la base URL configurada. El adaptador deberá:
 
 1. Construir la URL completa con `env.reqresBaseUrl`.
-2. Enviar `Content-Type` y `Accept` con valor `application/json`.
-3. Agregar el header `x-api-key` únicamente cuando `REQRES_API_KEY` tenga un valor.
-4. Rechazar un `Error` cuando `response.ok` sea `false`, incluyendo el código de estado.
-5. Devolver `null` cuando el estado sea `204` y, en el resto de los casos, el body parseado.
+2. Enviar `Accept: application/json` siempre y `Content-Type: application/json` cuando la petición tenga body.
+3. Rechazar un `Error` cuando `response.ok` sea `false`, incluyendo el código de estado.
+4. Devolver `null` cuando el estado sea `204` y, en el resto de los casos, el body parseado.
 
 > [!NOTE]
 > Ningún módulo fuera del adaptador debe conocer `fetch()`. Esa es la esencia del patrón Adapter: la dependencia queda encerrada en un único lugar.
 
 **3. Crear la capa de servicio**
 
-Crear `src/services/user.service.js`. Debe importar únicamente el adaptador y exportar:
+Crear `src/services/user.service.js`. Debe exportar una **Factory Function** `createUserService(adapter)` que reciba el adaptador como dependencia y retorne un objeto con las operaciones del dominio:
 
 | Función                      | Endpoint                          |
 | ---------------------------- | --------------------------------- |
@@ -603,15 +594,28 @@ Crear `src/services/user.service.js`. Debe importar únicamente el adaptador y e
 
 Reglas:
 
-1. Todas las funciones deben ser `async`.
-2. Deben utilizar `await` sobre el adaptador.
-3. `getUsers()` y `getUserById()` deben extraer la propiedad `data` de la respuesta.
-4. `createUser()`, `updateUser()` y `patchUser()` deben retornar el objeto devuelto por la API.
-5. El servicio no debe usar `fetch()` ni conocer headers.
+1. La Factory Function debe validar que el cliente recibido implemente `get`, `post`, `put`, `patch` y `delete`. Si falta alguno, debe lanzar un `Error`.
+2. Todas las funciones deben ser `async`.
+3. Deben utilizar `await` sobre el adaptador.
+4. `getUsers()` y `getUserById()` deben extraer la propiedad `data` de la respuesta.
+5. `createUser()`, `updateUser()` y `patchUser()` deben retornar el objeto devuelto por la API.
+6. El servicio no debe importar `fetch`, `axios` ni un adaptador concreto: lo recibe como parámetro.
+
+> [!NOTE]
+> El servicio depende de una **interfaz**, no de una implementación. Esa es la aplicación práctica del principio de inversión de dependencias: quien compone la aplicación decide qué adaptador entregar.
 
 **4. Ejecutar desde `app.js`**
 
-Importar el servicio y demostrar los seis métodos:
+En `src/app.js`, importar el adaptador de Fetch y la Factory Function, y componer el servicio:
+
+```javascript
+import fetchAdapter from "./adapters/http/fetch.adapter.js";
+import createUserService from "./services/user.service.js";
+
+const userService = createUserService(fetchAdapter);
+```
+
+Luego, demostrar los seis métodos usando `userService`:
 
 1. Listar la primera página de usuarios.
 2. Consultar un usuario por `id`.
@@ -646,6 +650,7 @@ node-fullstack-clase-04/
 
 - La base URL se obtiene de una variable de entorno; no está escrita en el código.
 - El adaptador es el único módulo que utiliza `fetch()`.
+- El servicio recibe el adaptador como dependencia: no importa `fetch` ni el adaptador.
 - El servicio no conoce headers, códigos de estado ni la forma en que se ejecuta la petición.
 - Se implementan los métodos `GET`, `POST`, `PUT`, `PATCH` y `DELETE`.
 - Los errores HTTP se detectan mediante `response.ok` y se propagan como `Error`.
@@ -707,7 +712,6 @@ const getUserById = async (id) => {
   const response = await axios.get(`${env.reqresBaseUrl}/users/${id}`, {
     headers: {
       Accept: "application/json",
-      ...(env.reqresApiKey && { "x-api-key": env.reqresApiKey }),
     },
   });
 
@@ -795,7 +799,6 @@ const axiosClient = axios.create({
   timeout: 5000,
   headers: {
     Accept: "application/json",
-    ...(env.reqresApiKey && { "x-api-key": env.reqresApiKey }),
   },
 });
 
@@ -844,8 +847,8 @@ axiosClient.interceptors.response.use(
 La Tarea 008 dejó el proyecto organizado en tres capas. Ahora llega el momento de comprobar si la separación fue real: si el servicio conoce `fetch()`, el reemplazo fallará. Si solo conoce el contrato del adaptador, el cambio será transparente.
 
 ```text
-app.js  →  user.service.js  →  adapters/http/index.js  →  fetch.adapter.js
-                                                       →  axios.adapter.js
+app.js  →  createUserService(adapter)  →  adapters/http/fetch.adapter.js
+                                       →  adapters/http/axios.adapter.js
 ```
 
 **1. Crear el adaptador de Axios**
@@ -863,34 +866,45 @@ Crear `src/adapters/http/axios.adapter.js`. Debe exportar las mismas cinco funci
 El adaptador deberá:
 
 1. Crear una instancia de Axios con `baseURL` y `timeout` definidos.
-2. Agregar el header `x-api-key` únicamente cuando `REQRES_API_KEY` tenga un valor.
-3. Recibir rutas relativas, igual que el adaptador de Fetch.
-4. Retornar `response.data`, no el objeto completo de Axios.
-5. Retornar `null` cuando el estado sea `204`.
-6. No exponer detalles de Axios hacia afuera.
+2. Recibir rutas relativas, igual que el adaptador de Fetch.
+3. Retornar `response.data`, no el objeto completo de Axios.
+4. Retornar `null` cuando el estado sea `204`.
+5. No exponer detalles de Axios hacia afuera.
 
 > [!IMPORTANT]
 > La interfaz es el contrato. Si el adaptador de Axios devuelve el objeto completo de Axios y el de Fetch devuelve solo el body, los dos adaptadores no son intercambiables y el servicio necesitaría dos versiones. La consistencia del contrato es lo que permite el reemplazo.
 
-**2. Elegir la implementación desde la configuración**
+**2. Elegir el adaptador en el punto de composición**
 
-Crear `src/adapters/http/index.js`. Debe leer `env.httpClient` y exportar la implementación correspondiente:
+En `src/app.js`, el servicio se crea con el adaptador elegido. No hay variable de entorno ni módulo intermediario: la decisión es explícita y vive en un único lugar.
 
-```text
-HTTP_CLIENT=fetch  →  fetch.adapter.js
-HTTP_CLIENT=axios  →  axios.adapter.js
+```javascript
+import axiosAdapter from "./adapters/http/axios.adapter.js";
+import createUserService from "./services/user.service.js";
+
+const userService = createUserService(axiosAdapter);
 ```
 
-La capa de servicio debe importar **únicamente** este módulo. No debe importar `fetch.adapter.js` ni `axios.adapter.js` directamente.
+Para volver a Fetch API, se cambia el import y el argumento:
 
-**3. Refactorizar la capa de servicio**
+```javascript
+import fetchAdapter from "./adapters/http/fetch.adapter.js";
+import createUserService from "./services/user.service.js";
 
-Modificar `src/services/user.service.js` para que importe el adaptador desde `src/adapters/http/index.js`. Las funciones y su comportamiento deben quedar idénticos a los de la Tarea 008.
+const userService = createUserService(fetchAdapter);
+```
+
+> [!NOTE]
+> Este punto se conoce como **composition root**: el lugar donde se ensamblan las piezas de la aplicación. Los módulos de negocio no eligen sus dependencias: las reciben.
+
+**3. Verificar que el servicio no cambia**
+
+`src/services/user.service.js` no debe modificarse. Si aparece un `import` de `axios`, de `fetch` o de un adaptador concreto dentro del servicio, la dependencia está mal ubicada: el servicio solo debe conocer el contrato que recibe por parámetro.
 
 **4. Verificar el reemplazo**
 
-1. Ejecutar la aplicación con `HTTP_CLIENT=fetch` y registrar los resultados de las seis operaciones.
-2. Cambiar la variable a `HTTP_CLIENT=axios` y ejecutar nuevamente.
+1. Ejecutar la aplicación con `fetchAdapter` y registrar los resultados de las seis operaciones.
+2. Cambiar la composición en `app.js` a `axiosAdapter` y ejecutar nuevamente.
 3. Comparar ambas salidas.
 
 El comportamiento observable debe ser equivalente. Lo único que cambia es la librería que ejecuta las peticiones.
@@ -903,8 +917,7 @@ node-fullstack-clase-04/
 │   ├── adapters/
 │   │   └── http/
 │   │       ├── axios.adapter.js
-│   │       ├── fetch.adapter.js
-│   │       └── index.js
+│   │       └── fetch.adapter.js
 │   ├── config/
 │   │   └── env.config.js
 │   ├── services/
@@ -920,17 +933,16 @@ node-fullstack-clase-04/
 **Criterios de aceptación**
 
 - Ambos adaptadores exponen la misma interfaz y el mismo formato de retorno.
-- `src/services/user.service.js` no cambia entre `HTTP_CLIENT=fetch` y `HTTP_CLIENT=axios`.
+- `src/services/user.service.js` no se modifica al cambiar de adaptador.
 - El servicio no importa `axios` ni `fetch` directamente.
-- La selección de la implementación proviene de una variable de entorno.
-- El header `x-api-key` solo se envía cuando existe una clave configurada.
+- La selección del adaptador está explícita en `app.js`; no depende de una variable de entorno.
 - Las respuestas `204` retornan `null` en las dos implementaciones.
 - Los errores HTTP se propagan como `Error` en ambos casos.
 
 > [!TIP]
 > **Desafío**
 >
-> Agregar un tercer adaptador basado en `node:https` o en una función simulada (_fake adapter_) que no realice peticiones de red. Configurarlo mediante `HTTP_CLIENT` y verificar que el servicio sigue funcionando sin cambios. Si el servicio no se modifica, la abstracción está bien construida.
+> Agregar un tercer adaptador basado en `node:https` o en una función simulada (_fake adapter_) que no realice peticiones de red. Pasarlo a `createUserService()` en `app.js` y verificar que el servicio sigue funcionando sin cambios. Si el servicio no se modifica, la abstracción está bien construida.
 
 <sub>[⬆ Volver al índice](#contenido)</sub>
 
